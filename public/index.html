@@ -126,7 +126,7 @@
       }
       .job-row {
         display: grid;
-        grid-template-columns: 1.9fr 0.7fr 0.9fr auto;
+        grid-template-columns: 2.2fr 1.4fr 1.4fr auto;
         gap: 8px;
         align-items: center;
         padding: 7px 0;
@@ -199,28 +199,24 @@
           <div class="pill">Minimal • Local or hosted</div>
         </div>
 
-        <form id="job-form">
-          <div>
+        <form id="url-form">
+          <div style="grid-column: 1 / -1;">
             <label for="url">URL</label>
             <input
               id="url"
               type="url"
               required
-              placeholder="https://your-render-app.onrender.com/"
+              placeholder="https://your-server-url.com/"
             />
           </div>
-          <div>
-            <label for="interval">Interval (minutes)</label>
-            <input id="interval" type="number" min="1" value="10" required />
-          </div>
           <div style="display:flex;align-items:flex-end;justify-content:flex-end;">
-            <button class="btn-primary" type="submit" id="add-btn">Add ping</button>
+            <button class="btn-primary" type="submit" id="add-btn">Add URL</button>
           </div>
         </form>
 
         <div class="jobs">
           <div class="jobs-header">
-            <span>Active URLs</span>
+            <span>Stored URLs (pinged every 14 minutes)</span>
             <button class="btn-ghost" type="button" id="refresh-btn">Refresh</button>
           </div>
           <div id="jobs-list"></div>
@@ -230,46 +226,65 @@
 
     <script>
       const jobsListEl = document.getElementById('jobs-list');
-      const form = document.getElementById('job-form');
+      const form = document.getElementById('url-form');
       const addBtn = document.getElementById('add-btn');
       const refreshBtn = document.getElementById('refresh-btn');
 
       const API_BASE = '';
 
-      function statusColor(status) {
-        if (!status) return 'idle';
-        if (status.startsWith('ok')) return 'ok';
-        if (status === 'error') return 'error';
+      function formatDateTime(value) {
+        if (!value) return '—';
+        const d = new Date(value);
+        if (Number.isNaN(d.getTime())) return '—';
+        return d.toLocaleString();
+      }
+
+      function statusLabel(item) {
+        if (!item.lastStatus) return 'Pending first ping';
+        if (item.lastStatus === 'ok') {
+          return item.lastStatusCode ? `OK (${item.lastStatusCode})` : 'OK';
+        }
+        return 'Error';
+      }
+
+      function statusClass(item) {
+        if (!item.lastStatus) return 'idle';
+        if (item.lastStatus === 'ok') return 'ok';
+        if (item.lastStatus === 'error') return 'error';
         return 'idle';
       }
 
-      function renderJobs(jobs) {
-        if (!jobs.length) {
+      function renderJobs(urls) {
+        if (!urls.length) {
           jobsListEl.innerHTML = '<div class=\"empty\">No URLs yet. Add one above to start pinging.</div>';
           return;
         }
         jobsListEl.innerHTML = '';
-        jobs.forEach((job) => {
+        urls.forEach((item) => {
           const row = document.createElement('div');
           row.className = 'job-row';
 
           const urlCol = document.createElement('div');
           urlCol.className = 'url';
           urlCol.innerHTML =
-            job.url +
-            (job.lastPing ? '<small>Last ping: ' + new Date(job.lastPing).toLocaleTimeString() + '</small>' : '');
-
-          const intervalCol = document.createElement('div');
-          intervalCol.innerHTML = '<span class=\"badge\">Every ' + job.intervalMs / 60000 + ' min</span>';
+            item.url +
+            '<small>Last ping: ' +
+            formatDateTime(item.lastPingAt) +
+            '</small>';
 
           const statusCol = document.createElement('div');
-          const color = statusColor(job.status);
+          const dotClass = statusClass(item);
           statusCol.innerHTML =
-            '<span class=\"badge\">' +
-            '<span class=\"badge-dot ' +
-            color +
-            '\"></span>' +
-            (job.status || 'idle') +
+            '<span class="badge"><span class="badge-dot ' +
+            dotClass +
+            '"></span>' +
+            statusLabel(item) +
+            '</span>';
+
+          const nextCol = document.createElement('div');
+          nextCol.innerHTML =
+            '<span class="badge">Next ping: ' +
+            formatDateTime(item.nextPingAt) +
             '</span>';
 
           const actionsCol = document.createElement('div');
@@ -280,7 +295,7 @@
           del.onclick = async () => {
             del.disabled = true;
             try {
-              await fetch(API_BASE + '/api/jobs/' + job.id, { method: 'DELETE' });
+              await fetch(API_BASE + '/api/urls/' + item.id, { method: 'DELETE' });
               await loadJobs();
             } catch (err) {
               console.error(err);
@@ -290,8 +305,8 @@
           actionsCol.appendChild(del);
 
           row.appendChild(urlCol);
-          row.appendChild(intervalCol);
           row.appendChild(statusCol);
+          row.appendChild(nextCol);
           row.appendChild(actionsCol);
           jobsListEl.appendChild(row);
         });
@@ -299,7 +314,7 @@
 
       async function loadJobs() {
         try {
-          const res = await fetch(API_BASE + '/api/jobs');
+          const res = await fetch(API_BASE + '/api/urls');
           const data = await res.json();
           renderJobs(data);
         } catch (err) {
@@ -310,18 +325,16 @@
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
         const url = document.getElementById('url').value.trim();
-        const interval = document.getElementById('interval').value;
         if (!url) return;
 
         addBtn.disabled = true;
         try {
-          await fetch(API_BASE + '/api/jobs', {
+          await fetch(API_BASE + '/api/urls', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url, intervalMinutes: interval }),
+            body: JSON.stringify({ url }),
           });
           form.reset();
-          document.getElementById('interval').value = 10;
           await loadJobs();
         } catch (err) {
           console.error(err);
